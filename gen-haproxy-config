@@ -1,0 +1,89 @@
+#!/usr/bin/python
+
+import argparse
+import os
+import sys
+import re
+import pprint
+
+from collections import defaultdict
+from jinja2 import Environment, FileSystemLoader
+
+
+re_tcp_port = re.compile('(?P<name>[\w\d_]+)_PORT_(?P<port>\d+)_TCP_PORT')
+re_tcp_addr = re.compile('(?P<name>[\w\d_]+)_PORT_(?P<port>\d+)_TCP_ADDR')
+args = None
+
+
+def parse_args():
+    p = argparse.ArgumentParser()
+    p.add_argument('--output', '-o',
+                   default='/etc/haproxy/haproxy.cfg')
+    p.add_argument('--template-dir', '-t',
+                   default='/etc/haproxy/templates')
+    p.add_argument('--service', '-s',
+                   nargs=3,
+                   action='append',
+                   default=[])
+    return p.parse_args()
+
+
+def discover_services():
+    global args
+
+    services = defaultdict(lambda: defaultdict(dict))
+
+    for k, v in os.environ.items():
+        mo = re_tcp_port.match(k)
+        if mo:
+            for s_name, c_port, h_port in args.service:
+                s_key = '%s_%s' % (s_name, c_port)
+                print s_name, c_port, h_port
+                print mo.groupdict()
+                if mo.group('name').startswith(s_name) and mo.group('port') == c_port:
+                    services[s_key][mo.group('name')]['port'] = v
+
+        mo = re_tcp_addr.match(k)
+        if mo:
+            for s_name, c_port, h_port in args.service:
+                s_key = '%s_%s' % (s_name, c_port)
+                if mo.group('name').startswith(s_name) and mo.group('port') == c_port:
+                    services[s_key][mo.group('name')]['addr'] = v
+
+    return services
+
+
+def main():
+    global args
+
+    args = parse_args()
+
+    # name container_port host_port
+    listeners = []
+    for s_name, c_port, h_port in args.service:
+        listeners.append({
+            'name': '%s_%s' % (s_name, c_port),
+            'host_port': h_port,
+        })
+
+    services = discover_services()
+
+    backends = {}
+    for service, data in services.items():
+        backends[service] = set()
+        for backend in data.values():
+            backends[service].add((backend['addr'], backend['port']))
+
+    pprint.pprint(backends)
+
+    env = Environment(loader=FileSystemLoader(['.',
+                                               args.template_dir]))
+    template = env.get_template('haproxy.cfg.tmpl')
+    with open(args.output, 'w') as fd:
+        fd.write(template.render(services=services,
+                                 listeners=listeners,
+                                 backends=backends))
+
+if __name__ == '__main__':
+    main()
+

@@ -1,0 +1,18 @@
+foo:
+  image: larsks/simpleweb
+
+bar:
+  image: larsks/simpleweb
+
+lb:
+  image: larsks/figlb
+  links:
+    - foo
+    - bar
+  environment:
+    - "SERVICES=--service FOO 80 9010 --service BAR 80 9020"
+  ports:
+    - "9010:9010"
+    - "9020:9020"
+
+
